@@ -1,4 +1,3 @@
-
 import os
 from flask import Flask, json, request, jsonify, send_file
 from flask_cors import CORS
@@ -8,6 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import datetime
 from bson import json_util
 from bson.objectid import ObjectId
+import bleach
 
 app = Flask(__name__)
 CORS(app)
@@ -31,27 +31,28 @@ client = MongoClient(uri, server_api=ServerApi('1'))
 
 db = client.lgf_db
 
-print(db)
 def token_required_newer(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = request.headers.get('Authorization')
-        print('token',token)
         if token:
 
             # Here, you would check if the token is valid and belongs to a user
             # For example, you could query your MongoDB 'lazyscorer' collection for a user with this token
             # If the token is valid, you can proceed with the decorated function
             current_user = db.users.find_one({'token':token.split(" ")[1]})
+            if current_user:
+                return f(current_user,*args, **kwargs)
+            else:
+                return jsonify({'error': 'Invalid token'}), 401
             return f(current_user,*args, **kwargs)
     return decorated_function
 
 @app.route('/register', methods=['POST'])
 def register():
-    print("form",request.form)
-    username = request.form['username']
-    fname= request.form['name']
-    password = request.form['password']
+    username = bleach.clean(request.form['username'])
+    fname= bleach.clean(request.form['name'])
+    password = bleach.clean(request.form['password'])
     user_tags = [i.strip() for i in list(request.form['user_tags'].split(","))]
     about= request.form['about'] if 'about' in request.form else ""
 
@@ -62,7 +63,7 @@ def register():
         token = str(uuid.uuid4())
         # Create a new user document in the 'lazyscorer' collection
         user = {'username': username, 'password': hashed_password,'fname':fname, 'token': token,'user_tags':user_tags,'about':about}
-        print(user)
+
         if db.users.find_one({'username':user['username']}):
             return jsonify({'error':"user already exists with username"}),401
         db.users.insert_one(user)
@@ -73,8 +74,8 @@ def register():
 
 @app.route('/login', methods=['POST'])
 def login():
-        username = request.form['username']
-        password = request.form['password']
+        username = bleach.clean(request.form['username'])
+        password = bleach.clean(request.form['password'])
         if username and password:
             # Find the user in the 'lazyscorer' collection
             user = db.users.find_one({'username': username})
@@ -91,10 +92,9 @@ def login():
 
 @app.route('/addUserTag',methods=['POST'])
 def add_new_tags():
-    tags = list(request.form['tags'].replace('[','').replace(']','').split(','))
+    tags = list(bleach.clean(request.form['tags']).replace('[','').replace(']','').split(','))
     #TODO
     try:
-        print([{'tag':i}for i in tags])
         db.user_tags.insert_many([{'tag':i}for i in tags])
         return jsonify({'success':'tags added'}),200
     except Exception as e:
@@ -128,7 +128,6 @@ def updateUser(currentUser):
 @app.route('/getUser',methods=['GET'])
 @token_required_newer
 def getUser(currentUser):
-    print(currentUser)
     # try:
     # return jsonify({'user':json.loads(json_util.dumps(currentUser))}),200
     # except:
@@ -142,7 +141,7 @@ def getUser(currentUser):
 
 @app.route('/addPostTag',methods=['POST'])
 def add_post_tags():
-    tags = list(request.form['tags'].replace('[','').replace(']','').split(','))
+    tags = list(bleach.clean(request.form['tags']).replace('[','').replace(']','').split(','))
     #TODO
     try:
         db.post_tags.insert_many([{'tag':i}for i in tags])
@@ -163,14 +162,14 @@ def getPostTags():
 @token_required_newer
 def newPost(currentUser):
     try:
-        tile = request.form['title']
-        description = request.form['description']
+        title = bleach.clean(request.form['title'])
+        description = bleach.clean(request.form['description'])
         createdAt = datetime.datetime.utcnow()
         createdBy = currentUser['fname']
         author = currentUser['username']
         post_tags = [i.strip() for i in list(request.form['post_tags'].replace('[','').replace(']','').replace('"','').split(","))]
         likes = []
-        post_ = {'title':tile,'description':description,'createdAt':createdAt,'createdBy':createdBy,'author':author,'likes':likes,'tags':post_tags}
+        post_ = {'title':title,'description':description,'createdAt':createdAt,'createdBy':createdBy,'author':author,'likes':likes,'tags':post_tags}
         db.posts.insert_one(post_)
         return jsonify({'success':'new post published'}),200 
     except Exception as e:
@@ -181,23 +180,24 @@ def newPost(currentUser):
 @token_required_newer
 def likePost(currentUser):
     try:
-        post_id = request.form['post_id']
+        post_id = bleach.clean(request.form['post_id'])
         post = db.posts.find_one({'_id':ObjectId(post_id)})
-        if '_id' not in post:
+        if post is None:
             return jsonify({'error':'error finding post'}),400
-        likes = post['likes']
-        if currentUser['username'] not in likes:
-            likes.append(currentUser['username'])
-        db.posts.update_one({{'_id':ObjectId(post_id)}},{'likes':likes})
+        likes = list(post['likes'])
+        if currentUser['username'] in likes:
+            return jsonify({'error':'already liked post'}),400
+        db.posts.update_one({'_id':ObjectId(post_id)},{'$push':{'likes':currentUser['username']}})
         return jsonify({'success':'successfully liked a post'}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error liking post'}),400
 
 @app.route('/getPost',methods=['POST'])
 @token_required_newer
 def getPost(currentUser):
     try:
-        post_id = request.form['post_id']
+        post_id = bleach.clean(request.form['post_id'])
         post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
@@ -211,7 +211,6 @@ def getPosts(currentUser):
     try:
         currentPage = int(request.args['page'])
         totalPages = (len(list(db.posts.find()))-1)//posts_per_page+1
-        print(totalPages)
         posts = db.posts.find().sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
@@ -234,13 +233,11 @@ def getPostsByUser(currentUser):
 @token_required_newer
 def queryPosts(currentUser):
     try:
-        query = request.args['query']
+        query = bleach.clean(request.args['query'])
         db.posts.create_index([('description','text'),('title','text'),('tags','text')])
-        print(query)
         # db.posts.create_index({'title':'text','description':'text'})
         # db.posts.create_index({'description':'text'})
         currentPage = int(request.args['page'])
-        print(currentPage)
         posts = db.posts.find({'$text':{"$search":query}}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         temp = list(posts)
         totalPages = (len(temp)-1)//posts_per_page+1
@@ -254,7 +251,7 @@ def queryPosts(currentUser):
 @token_required_newer
 def deletePost(currentUser):
     try:
-        post_id = request.form['post_id']
+        post_id = bleach.clean(request.form['post_id'])
         post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
@@ -269,17 +266,19 @@ def deletePost(currentUser):
 @token_required_newer
 def updatePost(currentUser):
     try:
-        post_id = request.form['post_id']
+        post_id = bleach.clean(request.form['post_id'])
         post = db.posts.find_one({'_id':ObjectId(post_id)})
-        if '_id' not in post:
+        if post is None:
             return jsonify({'error':'error finding post'}),400
         if post['author']!=currentUser['username']:
             return jsonify({'error':'cannot update post'}),400
-        title = request.form['title']
-        description = request.form['description']
-        db.post.update_one({'_id':ObjectId(post_id)},{'title':title,'description':description})
+        title = bleach.clean(request.form['title']) if 'title' in request.form else post['title']
+        description = bleach.clean(request.form['description']) if 'description' in request.form else post['description']
+        post_tags = [i.strip() for i in list(request.form['post_tags'].replace('[','').replace(']','').replace('"','').split(","))] if 'post_tags' in request.form else post['tags']
+        db.posts.update_one({'_id':ObjectId(post_id)},{'$set':{'title':title,'description':description,'tags':post_tags}})
         return jsonify({'success':'successfully updated post'}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error updating post'}),400
 
 #recommendation algorithm
@@ -287,7 +286,6 @@ def updatePost(currentUser):
 @token_required_newer
 def recommend(currentUser):
     try:
-        print(request.args)
         user_tags = currentUser['user_tags']
         totalPages = len(list(db.posts.find({'tags':{'$in':user_tags}})))
         currentPage = int(request.args.get('page'))
