@@ -25,7 +25,7 @@ You can set these variables by running the following commands in your terminal:
 
 ```
 
-export MONGO_URL=<your_mongodb_uri>
+export MONGO_URI=<your_mongodb_uri>
 ```
 
 Alternatively, you can create a `.env` file in the root directory of the project and set the variables there. Be sure to add the `.env` file to your `.gitignore` file to prevent it from being committed to your repository.
