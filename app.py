@@ -18,7 +18,8 @@ posts_per_page = 9
 
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-uri = "mongodb+srv://lfg:Jyvlm3ekEkStS48R@cluster0.iugqdiu.mongodb.net/?retryWrites=true&w=majority"
+uri = "mongodb+srv://lfg2:zYdhtMxy6WZKBKEZ@cluster0.iugqdiu.mongodb.net/?retryWrites=true&w=majority&tls=true&tlsAllowInvalidCertificates=true"
+# uri = "mongodb+srv://sthak027:bJWVRfLRJdzZRc34@cluster0.jei53fu.mongodb.net/?retryWrites=true&w=majority"
 # Create a new client and connect to the server
 client = MongoClient(uri, server_api=ServerApi('1'))
 
@@ -107,6 +108,7 @@ def getUserTags():
     except Exception as e:
         print(e)
         return jsonify({'error':"error getting tags"}),400
+
 @app.route('/updateUser',methods=['POST'])
 @token_required_newer
 def updateUser(currentUser):
@@ -131,7 +133,7 @@ def getUser(currentUser):
     # return jsonify({'user':json.loads(json_util.dumps(currentUser))}),200
     # except:
         # return jsonify({'error':"error"}),400
-    return jsonify({'user':{'username':currentUser['username'],'fname':currentUser['fname'],'user_tags':json.loads(json_util.dumps(currentUser['user_tags']))}})
+    return jsonify({'user':{'username':currentUser['username'],'fname':currentUser['fname'],'user_tags':json.loads(json_util.dumps(currentUser['user_tags'])),'about':currentUser['about']}}),200
     
 
 
@@ -164,12 +166,15 @@ def newPost(currentUser):
         tile = request.form['title']
         description = request.form['description']
         createdAt = datetime.datetime.utcnow()
+        createdBy = currentUser['fname']
         author = currentUser['username']
+        post_tags = [i.strip() for i in list(request.form['post_tags'].replace('[','').replace(']','').replace('"','').split(","))]
         likes = []
-        post_ = {'title':tile,'description':description,'createdAt':createdAt,'author':author,'likes':likes}
-        dp.posts.insert_one(post_)
+        post_ = {'title':tile,'description':description,'createdAt':createdAt,'createdBy':createdBy,'author':author,'likes':likes,'tags':post_tags}
+        db.posts.insert_one(post_)
         return jsonify({'success':'new post published'}),200 
     except Exception as e:
+        print("erroe",e)
         return jsonify({'error':'cannot publish post'}),400 
 
 @app.route('/likePost',methods=['POST'])
@@ -177,13 +182,13 @@ def newPost(currentUser):
 def likePost(currentUser):
     try:
         post_id = request.form['post_id']
-        post = db.post.find_one({'_id':ObjectId(post_id)})
+        post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
         likes = post['likes']
         if currentUser['username'] not in likes:
             likes.append(currentUser['username'])
-        db.post.update_one({{'_id':ObjectId(post_id)}},{'likes':likes})
+        db.posts.update_one({{'_id':ObjectId(post_id)}},{'likes':likes})
         return jsonify({'success':'successfully liked a post'}),200
     except Exception as e:
         return jsonify({'error':'error liking post'}),400
@@ -193,7 +198,7 @@ def likePost(currentUser):
 def getPost(currentUser):
     try:
         post_id = request.form['post_id']
-        post = db.post.find_one({'_id':ObjectId(post_id)})
+        post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
         return jsonify({'post':json.loads(json_util.dumps(post))}),200
@@ -204,22 +209,23 @@ def getPost(currentUser):
 @token_required_newer
 def getPosts(currentUser):
     try:
-        posts = db.post.find()
-        currentPage = int(request.args.get('page'))
-        posts = posts.skip((currentPage-1)*10).limit(10)
+        currentPage = int(request.args['page'])
+        totalPages = db.posts.find().size()/posts_per_page
+        posts = db.posts.sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         return jsonify({'posts':json.loads(json_util.dumps(posts))}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error getting posts'}),400
 @app.route('/getPostsByUser',methods=['GET'])
 @token_required_newer
 def getPostsByUser(currentUser):
     try:
-        posts = db.post.find({'author':currentUser['username']}).sort('createdAt',-1)
         currentPage = int(request.args.get('page'))
-        totalPages = posts.count()/posts_per_page
-        posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        posts = db.posts.find({'author':currentUser['username']}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        totalPages = len(list(posts))/posts_per_page
         return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error getting posts'}),400
         
 @app.route('/queryPosts',methods=['GET'])
@@ -227,7 +233,7 @@ def getPostsByUser(currentUser):
 def queryPosts(currentUser):
     try:
         query = request.args.get('query')
-        posts = db.post.find({'$text':{'$search':query}})
+        posts = db.posts.find({'$text':{'$search':query}})
         currentPage = int(request.args.get('page'))
         totalPages = posts.count()/posts_per_page
         posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
@@ -241,12 +247,12 @@ def queryPosts(currentUser):
 def deletePost(currentUser):
     try:
         post_id = request.form['post_id']
-        post = db.post.find_one({'_id':ObjectId(post_id)})
+        post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
         if post['author']!=currentUser['username']:
             return jsonify({'error':'cannot delete post'}),400
-        db.post.delete_one({'_id':ObjectId(post_id)})
+        db.posts.delete_one({'_id':ObjectId(post_id)})
         return jsonify({'success':'successfully deleted post'}),200
     except Exception as e:
         return jsonify({'error':'error deleting post'}),400
@@ -256,7 +262,7 @@ def deletePost(currentUser):
 def updatePost(currentUser):
     try:
         post_id = request.form['post_id']
-        post = db.post.find_one({'_id':ObjectId(post_id)})
+        post = db.posts.find_one({'_id':ObjectId(post_id)})
         if '_id' not in post:
             return jsonify({'error':'error finding post'}),400
         if post['author']!=currentUser['username']:
@@ -273,12 +279,16 @@ def updatePost(currentUser):
 @token_required_newer
 def recommend(currentUser):
     try:
+        print(request.args)
         user_tags = currentUser['user_tags']
-        posts = db.post.find({'tags':{'$in':user_tags}}).sort('createdAt',-1)
         currentPage = int(request.args.get('page'))
-        totalPages = posts.count()/posts_per_page
-        posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        posts = db.posts.find({'tags':{'$in':user_tags}}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        totalPages = (len(list(posts))-1)//posts_per_page +1
+
+        
         return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error getting posts'}),400
         
+
