@@ -1,4 +1,4 @@
-# LazyScorer
+# LGF
 
 This is a Flask app that uses MongoDB as a backend database and Google Cloud Vision API for image recognition.
 
@@ -42,6 +42,4 @@ gunicorn -w 4 'app:app'
 The -w option specifies the number of processes to run
 Once the app is running, you can access it by navigating to `http://localhost:5000` in your web browser.
 
-## License
 
-This app is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
