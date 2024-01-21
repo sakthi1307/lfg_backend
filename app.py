@@ -234,12 +234,17 @@ def getPostsByUser(currentUser):
 @token_required_newer
 def queryPosts(currentUser):
     try:
-        query = request.args.get('query')
-        posts = db.posts.find({'$text':{'$search':query}}).sort('createdAt',-1)
-        currentPage = int(request.args.get('page'))
-        totalPages = (len(list(db.posts.find({'$text':{'$search':query}})))-1)//posts_per_page+1
-        posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
-        return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
+        query = request.args['query']
+        db.posts.create_index([('description','text'),('title','text'),('tags','text')])
+        print(query)
+        # db.posts.create_index({'title':'text','description':'text'})
+        # db.posts.create_index({'description':'text'})
+        currentPage = int(request.args['page'])
+        print(currentPage)
+        posts = db.posts.find({'$text':{"$search":query}}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        temp = list(posts)
+        totalPages = (len(temp)-1)//posts_per_page+1
+        return jsonify({'posts':json.loads(json_util.dumps(temp)),'totalPages':1}),200
     except Exception as e:
         print(e)
         return jsonify({'error':'error getting posts'}),400
@@ -284,14 +289,13 @@ def recommend(currentUser):
     try:
         print(request.args)
         user_tags = currentUser['user_tags']
-        currentPage = int(db.posts.find({'tags':{'$in':user_tags}}))
+        totalPages = len(list(db.posts.find({'tags':{'$in':user_tags}})))
+        currentPage = int(request.args.get('page'))
         posts = db.posts.find({'tags':{'$in':user_tags}}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
-        totalPages = (len(list(posts))-1)//posts_per_page +1
-
-        
-        return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
+        temp = list(posts)
+        totalPages = (len(temp)-1)//posts_per_page+1
+        return jsonify({'posts':json.loads(json_util.dumps(temp)),'totalPages':1}),200
     except Exception as e:
         print(e)
         return jsonify({'error':'error getting posts'}),400
-        
 
