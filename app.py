@@ -210,9 +210,10 @@ def getPost(currentUser):
 def getPosts(currentUser):
     try:
         currentPage = int(request.args['page'])
-        totalPages = db.posts.find().size()/posts_per_page
-        posts = db.posts.sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
-        return jsonify({'posts':json.loads(json_util.dumps(posts))}),200
+        totalPages = (len(list(db.posts.find()))-1)//posts_per_page+1
+        print(totalPages)
+        posts = db.posts.find().sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
+        return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
         print(e)
         return jsonify({'error':'error getting posts'}),400
@@ -221,8 +222,9 @@ def getPosts(currentUser):
 def getPostsByUser(currentUser):
     try:
         currentPage = int(request.args.get('page'))
-        posts = db.posts.find({'author':currentUser['username']}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
-        totalPages = len(list(posts))/posts_per_page
+        posts = db.posts.find({'author':currentUser['username']}).sort('createdAt',-1)
+        totalPages = len(list(db.posts.find({'author':currentUser['username']})))//posts_per_page+1
+        posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
         print(e)
@@ -233,12 +235,13 @@ def getPostsByUser(currentUser):
 def queryPosts(currentUser):
     try:
         query = request.args.get('query')
-        posts = db.posts.find({'$text':{'$search':query}})
+        posts = db.posts.find({'$text':{'$search':query}}).sort('createdAt',-1)
         currentPage = int(request.args.get('page'))
-        totalPages = posts.count()/posts_per_page
+        totalPages = (len(list(db.posts.find({'$text':{'$search':query}})))-1)//posts_per_page+1
         posts = posts.skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         return jsonify({'posts':json.loads(json_util.dumps(posts)),'totalPages':totalPages}),200
     except Exception as e:
+        print(e)
         return jsonify({'error':'error getting posts'}),400
         
         
@@ -281,7 +284,7 @@ def recommend(currentUser):
     try:
         print(request.args)
         user_tags = currentUser['user_tags']
-        currentPage = int(request.args.get('page'))
+        currentPage = int(db.posts.find({'tags':{'$in':user_tags}}))
         posts = db.posts.find({'tags':{'$in':user_tags}}).sort('createdAt',-1).skip((currentPage-1)*posts_per_page).limit(posts_per_page)
         totalPages = (len(list(posts))-1)//posts_per_page +1
 
